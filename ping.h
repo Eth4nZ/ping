@@ -41,7 +41,10 @@ char *host;
 int nsent;  /* add 1 for each sendto() */
 pid_t pid;  /* our PID */
 int sockfd;
+
+int quiet_flag;
 int verbose;
+
 int daemon_proc;            /* set nonzero by daemon_init() */
 struct addrinfo *ai;
 
@@ -72,6 +75,8 @@ struct addrinfo* host_serv(const char *host, const char *serv, int family, int s
 static void err_doit(int errnoflag, int level, const char *fmt, va_list ap);
 void err_quit(const char *fmt, ...);
 void err_sys(const char *fmt, ...);
+void interrupt_func(int sig);
+void interrupt_event();
 
 struct proto {
     void (*fproc)(char *, ssize_t, struct timeval *);

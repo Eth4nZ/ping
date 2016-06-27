@@ -14,22 +14,22 @@ const char *usage =
 "Usage: ping [-b broadcast] [-h help] [-v verbose]";
 
 volatile sig_atomic_t interruptFlag = 0;
-void interrupt_func(int sig){
-    interruptFlag = 1;
-}
 
 
 int main(int argc, char **argv){
     int c;
 
     opterr = 0; /* don't want getopt() writing to stderr */
-    while((c = getopt(argc, argv, "bhv")) != -1){
+    while((c = getopt(argc, argv, "bhqv")) != -1){
         switch (c){
             case 'b':
                 return 0;
             case 'h':
                 puts(usage);
                 return 0;
+            case 'q':
+                quiet_flag = 1;
+                break;
             case 'v':
                 verbose = 1;
                 break;
@@ -39,6 +39,7 @@ int main(int argc, char **argv){
     }
 
     packetTransmittedNum = 0;
+    packetReceivedNum = 0;
 
     if (optind != argc-1)
         err_quit(usage);
@@ -108,9 +109,10 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
         rtt_sum1 += rtt*rtt;
 
 
-        printf("%d bytes from %s: seq=%u, ttl=%d, rtt=%.3f ms\n",
-                icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
-                icmp->icmp_seq, ip->ip_ttl, rtt);
+        if(quiet_flag != 1)
+            printf("%d bytes from %s: seq=%u, ttl=%d, rtt=%.3f ms\n",
+                    icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
+                    icmp->icmp_seq, ip->ip_ttl, rtt);
 
     } else if (verbose){
         printf("  %d bytes from %s: type = %d, code = %d\n",
@@ -203,6 +205,9 @@ void send_v4(void){
     int len;
     struct icmp *icmp;
 
+    if(interruptFlag)
+        interrupt_event();
+
     icmp = (struct icmp *) sendbuf;
     icmp->icmp_type = ICMP_ECHO;
     icmp->icmp_code = 0;
@@ -245,7 +250,6 @@ void readloop(void){
     struct timeval tval;
 
 
-    packetReceivedNum = 0;
     timePast = 0;
     rtt_min = 99999999;
     rtt_max = 0;
@@ -280,24 +284,6 @@ void readloop(void){
 
 
 
-        if(interruptFlag){
-            packetTransmittedNum = packetReceivedNum + packetLossNum;
-            if(packetTransmittedNum == 0)
-                packetTransmittedNum = 1;
-            rtt_sum /= (double)packetTransmittedNum;
-            rtt_sum1 /= (double)packetTransmittedNum;
-            rtt_mdev = sqrt(rtt_sum1 - rtt_sum*rtt_sum);
-
-            printf("--- %s ping statistics ---\n%d packets transmitted, %d received, %.3f%% packet loss, time %dms\n",
-                    ai->ai_canonname, packetTransmittedNum, packetReceivedNum, (float)packetLossNum/(float)packetTransmittedNum, 0);
-            if(packetReceivedNum > 0)
-                printf("rtt min/avg/max/mdev = %.3f/%.3f/%.3f/%.3f ms\n", \
-                        rtt_min, rtt_sum/packetTransmittedNum, rtt_max, rtt_mdev);
-            else
-                printf("\n");
-            interruptFlag = 1;
-            return;
-        }
     }
 }
 
@@ -434,3 +420,27 @@ void err_sys(const char *fmt, ...){
     va_end(ap);
     exit(1);
 }
+
+void interrupt_func(int sig){
+    interruptFlag = 1;
+}
+
+void interrupt_event(){
+    packetLossNum = packetTransmittedNum-packetReceivedNum;
+    if(packetTransmittedNum == 0)
+        packetTransmittedNum = 1;
+    rtt_sum /= (double)packetTransmittedNum;
+    rtt_sum1 /= (double)packetTransmittedNum;
+    rtt_mdev = sqrt(rtt_sum1 - rtt_sum*rtt_sum);
+
+    printf("\n--- %s ping statistics ---\n%d packets transmitted, %d received, %.0f%% packet loss, time %dms\n",
+            ai->ai_canonname, packetTransmittedNum, packetReceivedNum, (float)packetLossNum/(float)packetTransmittedNum*100, 0);
+    if(packetReceivedNum > 0)
+        printf("rtt min/avg/max/mdev = %.3f/%.3f/%.3f/%.3f ms\n", \
+                rtt_min, rtt_sum/packetTransmittedNum, rtt_max, rtt_mdev);
+    else
+        printf("\n");
+    interruptFlag = 1;
+    exit(0);
+}
+
