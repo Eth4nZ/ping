@@ -11,24 +11,34 @@ struct proto proto_v6 = {
 
 int datalen = 56;   /* data that goes with ICMP echo request */
 const char *usage =
-"Usage: ping [-b broadcast] [-h help] [-v verbose]";
-
-volatile sig_atomic_t interruptFlag = 0;
+"Usage: ping [-b broadcast] [-c count] [-h help] [-v verbose]";
 
 
 int main(int argc, char **argv){
     int c;
+    int i;
 
     opterr = 0; /* don't want getopt() writing to stderr */
-    while((c = getopt(argc, argv, "bhqv")) != -1){
+    while((c = getopt(argc, argv, "bc:hqt:v:")) != -1){
         switch (c){
             case 'b':
                 return 0;
+            case 'c':
+                count_flag = 1;
+                ncount = atoi(optarg);
+                break;
             case 'h':
                 puts(usage);
                 return 0;
             case 'q':
                 quiet_flag = 1;
+                break;
+            case 't':
+                ttl_flag = 1;
+                i = atoi(optarg);
+                if(i < 0 || i > 255)
+                    err_quit("tll %u out of range\n", i);
+                ttl = i;
                 break;
             case 'v':
                 verbose = 1;
@@ -47,7 +57,7 @@ int main(int argc, char **argv){
 
     pid = getpid() & 0xffff;
     signal(SIGALRM, sig_alrm);
-    signal(SIGINT, interrupt_func);
+    signal(SIGINT, interrupt_event);
 
     ai = host_serv(host, NULL, 0, 0);
 
@@ -113,6 +123,10 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
             printf("%d bytes from %s: seq=%u, ttl=%d, rtt=%.3f ms\n",
                     icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
                     icmp->icmp_seq, ip->ip_ttl, rtt);
+
+        if(count_flag)
+            if(packetTransmittedNum >= ncount)
+                interrupt_event();
 
     } else if (verbose){
         printf("  %d bytes from %s: type = %d, code = %d\n",
@@ -205,8 +219,6 @@ void send_v4(void){
     int len;
     struct icmp *icmp;
 
-    if(interruptFlag)
-        interrupt_event();
 
     icmp = (struct icmp *) sendbuf;
     icmp->icmp_type = ICMP_ECHO;
@@ -264,6 +276,9 @@ void readloop(void){
 
     size = 60 * 1024; /* OK if setsockopt fails */
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+
+    //if(ttl_flag == 1){
+        //if(setsockopt(s, IPPROTO_IP, IP_
 
     sig_alrm(SIGALRM); /* send first packet */
 
@@ -421,10 +436,6 @@ void err_sys(const char *fmt, ...){
     exit(1);
 }
 
-void interrupt_func(int sig){
-    interruptFlag = 1;
-}
-
 void interrupt_event(){
     packetLossNum = packetTransmittedNum-packetReceivedNum;
     if(packetTransmittedNum == 0)
@@ -433,14 +444,14 @@ void interrupt_event(){
     rtt_sum1 /= (double)packetTransmittedNum;
     rtt_mdev = sqrt(rtt_sum1 - rtt_sum*rtt_sum);
 
-    printf("\n--- %s ping statistics ---\n%d packets transmitted, %d received, %.0f%% packet loss, time %dms\n",
-            ai->ai_canonname, packetTransmittedNum, packetReceivedNum, (float)packetLossNum/(float)packetTransmittedNum*100, 0);
+    printf("\n--- %s ping statistics ---\n", ai->ai_canonname);
+    printf("%d packets transmitted, %d received, %d%% packet loss\n", packetTransmittedNum, packetReceivedNum, packetLossNum*100/packetTransmittedNum);
     if(packetReceivedNum > 0)
         printf("rtt min/avg/max/mdev = %.3f/%.3f/%.3f/%.3f ms\n", \
                 rtt_min, rtt_sum/packetTransmittedNum, rtt_max, rtt_mdev);
     else
         printf("\n");
-    interruptFlag = 1;
-    exit(0);
+    close(sockfd);
+    exit(1);
 }
 
