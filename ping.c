@@ -11,7 +11,7 @@ struct proto proto_v6 = {
 
 int datalen = 56;   /* data that goes with ICMP echo request */
 const char *usage =
-"Usage: ping [-b broadcast] [-c count] [-h help] [-v verbose]";
+"Usage: ping [-b broadcast] [-c count] [-h help] [-q quiet] [-v verbose]";
 
 
 int main(int argc, char **argv){
@@ -19,7 +19,7 @@ int main(int argc, char **argv){
     int i;
 
     opterr = 0; /* don't want getopt() writing to stderr */
-    while((c = getopt(argc, argv, "bc:hqt:v:")) != -1){
+    while((c = getopt(argc, argv, "bc:hqt:v")) != -1){
         switch (c){
             case 'b':
                 return 0;
@@ -127,7 +127,8 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
         if(count_flag)
             if(packetTransmittedNum >= ncount)
                 interrupt_event();
-
+    } else if (icmp->icmp_type == ICMP_TIME_EXCEEDED) {
+        printf("Time to live exceeded\n");
     } else if (verbose){
         printf("  %d bytes from %s: type = %d, code = %d\n",
                 icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
@@ -276,9 +277,13 @@ void readloop(void){
 
     size = 60 * 1024; /* OK if setsockopt fails */
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+    if(ttl_flag){
+        if(setsockopt(sockfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1)
+            err_quit("cannot set multicast ttl\n");
+        //else
+            //printf("set ttl to %d\n", ttl);
+    }
 
-    //if(ttl_flag == 1){
-        //if(setsockopt(s, IPPROTO_IP, IP_
 
     sig_alrm(SIGALRM); /* send first packet */
 
