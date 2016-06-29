@@ -11,14 +11,15 @@ struct proto proto_v6 = {
 
 int datalen = 56;   /* data that goes with ICMP echo request */
 const char *usage ="\
-Usage: ping [-b broadcast] [-c count] [-f flood] [-i interval]\n\
-            [-h help] [-q quiet] [-t ttl] [-v verbose]\
+Usage: ping [-b broadcast] [-c count] [-f flood] [-h help]\n\
+            [-i interval] [-q quiet] [-t ttl] [-v verbose]\
             ";
 
 
 int main(int argc, char **argv){
     int c;
     int i;
+    ping_interval = 1;
 
     opterr = 0; /* don't want getopt() writing to stderr */
     while((c = getopt(argc, argv, "bc:fhi:qt:v")) != -1){
@@ -39,7 +40,6 @@ int main(int argc, char **argv){
                 return 0;
             case 'i':
                 ping_interval = atof(optarg);
-                printf("%.2f\n", ping_interval);
                 if(ping_interval <= 0)
                     err_quit("ping: bad timing interval\n");
                 interval_flag = 1;
@@ -176,9 +176,10 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
             write(STDOUT_FILENO, &BSPACE, 1);
         }
 
-        if(count_flag)
+        if(count_flag){
             if(packetTransmittedNum >= ncount)
                 interrupt_event();
+        }
 
     } else if (icmp->icmp_type == ICMP_TIME_EXCEEDED) {
             printf("From %s seq=%u Time to live exceeded\n",
@@ -276,6 +277,7 @@ void send_v4(void){
     struct icmp *icmp;
 
 
+
     icmp = (struct icmp *) sendbuf;
     icmp->icmp_type = ICMP_ECHO;
     icmp->icmp_code = 0;
@@ -289,9 +291,16 @@ void send_v4(void){
 
     sendto(sockfd, sendbuf, len, 0, pr->sasend, pr->salen);
     packetTransmittedNum++;
+    if(nsent > MAX_DUP_CHK)
+        interrupt_event();
+
     if(!quiet_flag && flood_flag){
         write(STDOUT_FILENO, &DOT, 1);
     }
+
+    if(count_flag)
+        if(packetTransmittedNum >= ncount)
+            return;
 }
 
 void send_v6(){
