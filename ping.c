@@ -11,8 +11,8 @@ struct proto proto_v6 = {
 
 int datalen = 56;   /* data that goes with ICMP echo request */
 const char *usage ="\
-Usage: ping [-b broadcast] [-c count] [-h help] [-q quiet]\n\
-            [-t ttl] [-v verbose]\
+Usage: ping [-b broadcast] [-c count] [-f flood] [-i interval]\n\
+            [-h help] [-q quiet] [-t ttl] [-v verbose]\
             ";
 
 
@@ -21,7 +21,7 @@ int main(int argc, char **argv){
     int i;
 
     opterr = 0; /* don't want getopt() writing to stderr */
-    while((c = getopt(argc, argv, "bc:fhqt:v")) != -1){
+    while((c = getopt(argc, argv, "bc:fhi:qt:v")) != -1){
         switch (c){
             case 'b':
                 broadcast_flag = 1;
@@ -32,10 +32,18 @@ int main(int argc, char **argv){
                 break;
             case 'f':
                 flood_flag = 1;
+                setbuf(stdout, NULL);
                 break;
             case 'h':
                 puts(usage);
                 return 0;
+            case 'i':
+                ping_interval = atof(optarg);
+                printf("%.2f\n", ping_interval);
+                if(ping_interval <= 0)
+                    err_quit("ping: bad timing interval\n");
+                interval_flag = 1;
+                break;
             case 'q':
                 quiet_flag = 1;
                 break;
@@ -154,7 +162,7 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
         }
 
 
-        if(quiet_flag != 1){
+        if(!quiet_flag && !flood_flag){
             printf("%d bytes from %s: seq=%u, ttl=%d, rtt=%.3f ms",
                     icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
                     icmp->icmp_seq, ip->ip_ttl, rtt);
@@ -163,6 +171,9 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
                 printf(" (DUP!)");
 
             printf("\n");
+        }
+        if(flood_flag){
+            write(STDOUT_FILENO, &BSPACE, 1);
         }
 
         if(count_flag)
@@ -278,6 +289,9 @@ void send_v4(void){
 
     sendto(sockfd, sendbuf, len, 0, pr->sasend, pr->salen);
     packetTransmittedNum++;
+    if(!quiet_flag && flood_flag){
+        write(STDOUT_FILENO, &DOT, 1);
+    }
 }
 
 void send_v6(){
@@ -360,7 +374,10 @@ void readloop(void){
 void sig_alrm(int signo){
     (*pr->fsend)();
 
-    alarm(1);
+    if(ping_interval >= 1)
+        alarm(ping_interval);
+    else
+        ualarm((useconds_t)(ping_interval*1000000), (useconds_t)(ping_interval*1000000));
     return;         /* probably interrupts recvfrom() */
 }
 
