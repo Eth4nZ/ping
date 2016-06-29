@@ -10,8 +10,10 @@ struct proto proto_v6 = {
 #endif
 
 int datalen = 56;   /* data that goes with ICMP echo request */
-const char *usage =
-"Usage: ping [-b broadcast] [-c count] [-h help] [-q quiet] [-v verbose]";
+const char *usage ="\
+Usage: ping [-b broadcast] [-c count] [-h help] [-q quiet]\n\
+            [-t ttl] [-v verbose]\
+            ";
 
 
 int main(int argc, char **argv){
@@ -19,13 +21,17 @@ int main(int argc, char **argv){
     int i;
 
     opterr = 0; /* don't want getopt() writing to stderr */
-    while((c = getopt(argc, argv, "bc:hqt:v")) != -1){
+    while((c = getopt(argc, argv, "bc:fhqt:v")) != -1){
         switch (c){
             case 'b':
-                return 0;
+                broadcast_flag = 1;
+                break;
             case 'c':
                 count_flag = 1;
                 ncount = atoi(optarg);
+                break;
+            case 'f':
+                flood_flag = 1;
                 break;
             case 'h':
                 puts(usage);
@@ -50,6 +56,9 @@ int main(int argc, char **argv){
 
     packetTransmittedNum = 0;
     packetReceivedNum = 0;
+    packetDupNum = 0;
+    nrtt = 0;
+    memset(duparr, 0, sizeof(duparr));
 
     if (optind != argc-1)
         err_quit(usage);
@@ -60,6 +69,21 @@ int main(int argc, char **argv){
     signal(SIGINT, interrupt_event);
 
     ai = host_serv(host, NULL, 0, 0);
+
+    /* check broadcast address */
+    if(!broadcast_flag){
+        int j;
+        for(j = 16; j > 0; j--){
+            if(Sock_ntop_host(ai->ai_addr, ai->ai_addrlen)[j] == '\0'){
+                if(Sock_ntop_host(ai->ai_addr, ai->ai_addrlen)[j-3] == '2' &&
+                        Sock_ntop_host(ai->ai_addr, ai->ai_addrlen)[j-2] == '5' &&
+                        Sock_ntop_host(ai->ai_addr, ai->ai_addrlen)[j-1] == '5' )
+                    err_quit("Do you want to ping broadcast? Then -b\n");
+            }
+            else
+                break;
+        }
+    }
 
     printf("PING %s (%s): %d bytes of data.\n", ai->ai_canonname,
             Sock_ntop_host(ai->ai_addr, ai->ai_addrlen), datalen);
@@ -117,18 +141,38 @@ void proc_v4(char *ptr, ssize_t len, struct timeval *tvrecv){
             rtt_max = rtt;
         rtt_sum += rtt;
         rtt_sum1 += rtt*rtt;
+        nrtt++;
+
+        if(duparr[icmp->icmp_seq] == 1){
+            packetReceivedNum--;
+            dup_flag = 1;
+            packetDupNum++;
+        }
+        else{
+            duparr[icmp->icmp_seq] = 1;
+            dup_flag = 0;
+        }
 
 
-        if(quiet_flag != 1)
-            printf("%d bytes from %s: seq=%u, ttl=%d, rtt=%.3f ms\n",
+        if(quiet_flag != 1){
+            printf("%d bytes from %s: seq=%u, ttl=%d, rtt=%.3f ms",
                     icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
                     icmp->icmp_seq, ip->ip_ttl, rtt);
+
+            if(dup_flag)
+                printf(" (DUP!)");
+
+            printf("\n");
+        }
 
         if(count_flag)
             if(packetTransmittedNum >= ncount)
                 interrupt_event();
+
     } else if (icmp->icmp_type == ICMP_TIME_EXCEEDED) {
-        printf("Time to live exceeded\n");
+            printf("From %s seq=%u Time to live exceeded\n",
+                    Sock_ntop_host(pr->sarecv, pr->salen),
+                    nsent-1);
     } else if (verbose){
         printf("  %d bytes from %s: type = %d, code = %d\n",
                 icmplen, Sock_ntop_host(pr->sarecv, pr->salen),
@@ -282,6 +326,12 @@ void readloop(void){
             err_quit("cannot set multicast ttl\n");
         //else
             //printf("set ttl to %d\n", ttl);
+    }
+    if(broadcast_flag){
+        if(setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (char *)&size, sizeof(size)) == -1)
+            err_quit("cannot set broadcast\n");
+        //else
+            //printf("set broadcast successfully\n");
     }
 
 
@@ -445,15 +495,20 @@ void interrupt_event(){
     packetLossNum = packetTransmittedNum-packetReceivedNum;
     if(packetTransmittedNum == 0)
         packetTransmittedNum = 1;
-    rtt_sum /= (double)packetTransmittedNum;
-    rtt_sum1 /= (double)packetTransmittedNum;
+    if(nrtt == 0)
+        nrtt = 1;
+    rtt_sum /= (double)nrtt;  //it became rtt_avg now
+    rtt_sum1 /= (double)nrtt;
     rtt_mdev = sqrt(rtt_sum1 - rtt_sum*rtt_sum);
 
     printf("\n--- %s ping statistics ---\n", ai->ai_canonname);
-    printf("%d packets transmitted, %d received, %d%% packet loss\n", packetTransmittedNum, packetReceivedNum, packetLossNum*100/packetTransmittedNum);
+    printf("%d packets transmitted, %d received, ", packetTransmittedNum, packetReceivedNum);
+    if(packetDupNum > 0)
+        printf("+%d duplicates, ", packetDupNum);
+    printf("%d%% packet loss\n", packetLossNum*100/packetTransmittedNum);
     if(packetReceivedNum > 0)
         printf("rtt min/avg/max/mdev = %.3f/%.3f/%.3f/%.3f ms\n", \
-                rtt_min, rtt_sum/packetTransmittedNum, rtt_max, rtt_mdev);
+                rtt_min, rtt_sum, rtt_max, rtt_mdev);
     else
         printf("\n");
     close(sockfd);
