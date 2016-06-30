@@ -11,8 +11,9 @@ struct proto proto_v6 = {
 
 int datalen = 56;   /* data that goes with ICMP echo request */
 const char *usage ="\
-Usage: ping [-b broadcast] [-c count] [-f flood] [-h help]\n\
-            [-i interval] [-q quiet] [-t ttl] [-v verbose]\
+Usage: ping [-b broadcast] [-c count] [-d so_debug] [-f flood]\n\
+            [-h help] [-i interval] [-q quiet] [-s packetsize]\n\
+            [-t ttl] [-v verbose]\
             ";
 
 
@@ -22,7 +23,7 @@ int main(int argc, char **argv){
     ping_interval = 1;
 
     opterr = 0; /* don't want getopt() writing to stderr */
-    while((c = getopt(argc, argv, "bc:fhi:qt:v")) != -1){
+    while((c = getopt(argc, argv, "bc:dfhi:qs:t:v")) != -1){
         switch (c){
             case 'b':
                 broadcast_flag = 1;
@@ -30,6 +31,9 @@ int main(int argc, char **argv){
             case 'c':
                 count_flag = 1;
                 ncount = atoi(optarg);
+                break;
+            case 'd':
+                sodebug_flag = 1;
                 break;
             case 'f':
                 flood_flag = 1;
@@ -46,6 +50,11 @@ int main(int argc, char **argv){
                 break;
             case 'q':
                 quiet_flag = 1;
+                break;
+            case 's':
+                datalen = atof(optarg);
+                if(datalen < 56)
+                    err_quit("byte size %d out of range\n", datalen);
                 break;
             case 't':
                 ttl_flag = 1;
@@ -343,7 +352,9 @@ void readloop(void){
     setuid(getuid()); /* don't need special permissions any more */
 
     size = 60 * 1024; /* OK if setsockopt fails */
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+    if(sodebug_flag)
+        setsockopt(sockfd, SOL_SOCKET, SO_DEBUG, &size, sizeof(size));
+    //setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
     if(ttl_flag){
         if(setsockopt(sockfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1)
             err_quit("cannot set multicast ttl\n");
